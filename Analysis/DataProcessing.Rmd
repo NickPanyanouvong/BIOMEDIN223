@@ -1,0 +1,89 @@
+# CSV Processing
+
+```{r}
+# Load in packages and dataset
+library(tidyverse)
+library(rstudioapi)
+
+# Adjust working directory
+file_path <- rstudioapi::getSourceEditorContext()$path
+setwd(dirname(file_path))
+
+# Load in data and helper function file
+data <- read.csv("../DATA/BC_data.csv")
+source("Helpers.R")
+```
+
+We begin by handling missing values and reformatting variable types. We use the custom helper function factorize(), which identifies all categorical variables and converts them into factors with "" -> "Missing."
+
+```{r}
+data <- factorize(data)
+```
+
+```{r}
+# Explore dataset
+str(data)
+print(unique(data$patient_state))
+```
+
+```{r}
+# Generate descriptive table of cohort
+library(table1)
+table1 <- table1(~ patient_race + payer_type + patient_state + patient_age + bmi | region, data)
+
+write.csv(table1, "summary_stats.csv")
+```
+
+```{r}
+# Get rid of select columns
+cols_to_remove <- c("breast_cancer_diagnosis_desc", "patient_zip3", "patient_id")
+data <- data[, !names(data) %in% cols_to_remove]
+
+# Assess missingness
+print(sum(data$payer_type == "Missing"))
+```
+```{r}
+# Extract subset of columns for comparison
+subset_data <- data[, 17:50]
+
+# Calculate a hash for each row in the subset_data
+hashes <- apply(subset_data, 1, function(row) paste(row, collapse = ","))
+
+# Use match to find unique hashes and assign region indices
+unique_hashes <- unique(hashes)
+region_indices <- match(hashes, unique_hashes)
+
+# Assign regions to the dataframe
+data$geo_zone <- as.factor(region_indices)
+# zone_nums <- seq(1, 1089)
+# zone_names <- paste("Zone_", zone_nums, sep = "")
+
+print(typeof(data$geo_zone))
+```
+
+
+```{r}
+# Select numeric columns except "treatment_pd"
+numeric_cols <- sapply(data, is.numeric) & colnames(data) != "treatment_pd"
+
+# Z-standardize numeric columns except "treatment_pd"
+standard_data <- as.data.frame(scale(data[, numeric_cols]))
+
+# Copy non-numeric columns from original dataframe
+non_numeric_cols <- data[, !numeric_cols]
+standard_data <- cbind(non_numeric_cols, standard_data)
+standard_data <- cbind(standard_data, data$treatment_pd)
+standard_data <- rename(standard_data, treatment_time = `data$treatment_pd`)
+
+# Add an ID column with unique identifiers
+data$ID <- seq_len(nrow(data))
+standard_data$ID <- seq_len(nrow(standard_data))
+
+# Move the ID column to the beginning of the dataframe
+data <- data[, c("ID", names(data)[-which(names(data) == "ID")])]
+standard_data <- standard_data[, c("ID", names(standard_data)[-which(names(standard_data) == "ID")])]
+
+# Save CSVs
+write.csv(data, "../DATA/BC_data.csv", row.names = FALSE)
+write.csv(data, "../DATA/standard_BC_data.csv", row.names = FALSE)
+```
